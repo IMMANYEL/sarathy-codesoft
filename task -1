@@ -1,0 +1,174 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pickle
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report, roc_curve, auc
+from sklearn.model_selection import train_test_split, GridSearchCV
+
+import warnings
+warnings.filterwarnings("ignore")
+
+# Load the Titanic dataset
+def load_data(path='Titanic-Dataset.csv'):
+    return pd.read_csv(path)
+
+df = load_data()
+print("First 5 rows:")
+print(df.head())
+
+# Feature engineering: create FamilySize and extract Title from Name
+def feature_engineering(df):
+    df = df.copy()
+    df['FamilySize'] = df['SibSp'] + df['Parch'] + 1
+    
+    # Extract title from Name
+    df['Title'] = df['Name'].str.extract(' ([A-Za-z]+)\.', expand=False)
+    
+    # Simplify titles
+    df['Title'] = df['Title'].replace([
+        'Lady', 'Countess', 'Capt', 'Col', 'Don', 'Dr', 'Major', 'Rev', 
+        'Sir', 'Jonkheer', 'Dona'], 'celebrities')
+    df['Title'] = df['Title'].replace(['Mlle', 'Ms'], 'Miss')
+    df['Title'] = df['Title'].replace('Mme', 'Mrs')
+    
+    # Remove rows where Title is 'Master'
+    df = df[df['Title'] != 'Master'].reset_index(drop=True)
+    
+    return df
+
+
+df = feature_engineering(df)
+
+# Drop columns not needed for modeling
+df.drop(['PassengerId', 'Name', 'Ticket', 'Cabin'], axis=1, inplace=True)
+
+# Separate target and features
+X = df.drop('Survived', axis=1)
+y = df['Survived']
+
+# Define columns by type
+numeric_features = ['Age', 'Fare', 'SibSp', 'Parch', 'FamilySize', 'Pclass']
+categorical_features = ['Sex', 'Embarked', 'Title']
+
+# Preprocessing pipelines for numeric and categorical data
+numeric_transformer = Pipeline(steps=[
+    ('imputer', SimpleImputer(strategy='median')),
+    ('scaler', MinMaxScaler())
+])
+
+categorical_transformer = Pipeline(steps=[
+    ('imputer', SimpleImputer(strategy='most_frequent')),
+    ('onehot', OneHotEncoder(drop='first'))
+])
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', numeric_transformer, numeric_features),
+        ('cat', categorical_transformer, categorical_features)
+    ])
+
+# Create a pipeline that first preprocesses, then fits logistic regression
+pipeline = Pipeline(steps=[('preprocessor', preprocessor),
+                           ('classifier', LogisticRegression(max_iter=300))])
+
+# Split data into train and test
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Hyperparameter tuning with GridSearchCV
+param_grid = {
+    'classifier__C': [0.01, 0.1, 1, 10, 100],
+    'classifier__solver': ['liblinear', 'lbfgs']
+}
+
+grid_search = GridSearchCV(pipeline, param_grid, cv=5, scoring='accuracy')
+grid_search.fit(X_train, y_train)
+
+print(f"Best parameters: {grid_search.best_params_}")
+print(f"Best cross-validation accuracy: {grid_search.best_score_:.4f}")
+
+# Evaluate on test set
+best_model = grid_search.best_estimator_
+y_pred = best_model.predict(X_test)
+y_prob = best_model.predict_proba(X_test)[:,1]
+
+acc = accuracy_score(y_test, y_pred)
+cm = confusion_matrix(y_test, y_pred)
+report = classification_report(y_test, y_pred)
+
+print(f"\nTest Accuracy: {acc:.4f}")
+print("\nConfusion Matrix:\n", cm)
+print("\nClassification Report:\n", report)
+
+# Plot ROC curve
+fpr, tpr, _ = roc_curve(y_test, y_prob)
+roc_auc = auc(fpr, tpr)
+
+plt.figure(figsize=(8,6))
+plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (AUC = {roc_auc:.2f})')
+plt.plot([0,1], [0,1], color='navy', lw=2, linestyle='--')
+plt.xlim([0,1])
+plt.ylim([0,1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC) Curve')
+plt.legend(loc='lower right')
+plt.show()
+
+# Save the model pipeline for future use
+with open('titanic_model.pkl', 'wb') as f:
+    pickle.dump(best_model, f)
+print("Model saved as 'titanic_model.pkl'")
+
+# Exploratory Data Analysis (EDA) Visualizations
+
+# Survival count
+plt.figure(figsize=(6,4))
+sns.countplot(x='Survived', data=df, palette=['salmon','skyblue'])
+plt.xticks([0,1], ['Did Not Survive', 'Survived'])
+plt.title('Survival Count')
+plt.show()
+
+# Age distribution by sex
+plt.figure(figsize=(8,5))
+sns.histplot(data=df, x='Age', bins=30, kde=True, hue='Sex', palette='Set2')
+plt.title('Age Distribution by Sex')
+plt.show()
+
+# Survival rate by Title
+plt.figure(figsize=(8,5))
+sns.barplot(x='Title', y='Survived', data=df, palette='muted')
+plt.title('Survival Rate by Title')
+plt.show()
+
+# Survival rate by FamilySize
+plt.figure(figsize=(8,5))
+sns.barplot(x='FamilySize', y='Survived', data=df, palette='coolwarm')
+plt.title('Survival Rate by Family Size')
+plt.show()
+
+# Fare distribution
+plt.figure(figsize=(8,5))
+sns.histplot(df['Fare'], bins=40, color='lightcoral', edgecolor='black')
+plt.title('Fare Distribution')
+plt.show()
+
+# Survival by Passenger Class and Sex
+plt.figure(figsize=(10,6))
+sns.barplot(x='Pclass', y='Survived', hue='Sex', data=df, palette='pastel')
+plt.title('Survival Rate by Passenger Class and Sex')
+plt.show()
+
+# Corrected Correlation heatmap: select numeric columns only
+plt.figure(figsize=(10,6))
+numeric_df = df.select_dtypes(include=[np.number])
+corr = numeric_df.corr()
+sns.heatmap(corr, annot=True, cmap='coolwarm', fmt=".2f")
+plt.title("Correlation Heatmap (Numeric Features Only)")
+plt.show()
