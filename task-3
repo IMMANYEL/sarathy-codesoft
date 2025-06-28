@@ -1,0 +1,120 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import statsmodels.api as sm
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
+
+import warnings
+warnings.filterwarnings('ignore')
+
+# Load dataset
+advertising = pd.read_csv("advertising.csv")
+
+# Basic EDA
+print(advertising.head())
+print(f"Dataset shape: {advertising.shape}")
+print(advertising.info())
+print(advertising.describe())
+
+# Check for missing values percentage
+missing_pct = advertising.isnull().sum() * 100 / advertising.shape[0]
+print("Missing values percentage:\n", missing_pct)
+
+# Outlier analysis with boxplots
+fig, axs = plt.subplots(3, 1, figsize=(8, 10))
+sns.boxplot(advertising['TV'], ax=axs[0]).set_title('TV Advertising Spend')
+sns.boxplot(advertising['Radio'], ax=axs[1]).set_title('Radio Advertising Spend')
+sns.boxplot(advertising['Newspaper'], ax=axs[2]).set_title('Newspaper Advertising Spend')
+plt.tight_layout()
+plt.show()
+
+# Boxplot for Sales
+plt.figure(figsize=(6,4))
+sns.boxplot(advertising['Sales'])
+plt.title('Sales Distribution')
+plt.show()
+
+# Pairplot to visualize relationships between all advertising spends and sales
+sns.pairplot(advertising, x_vars=['TV', 'Radio', 'Newspaper'], y_vars='Sales', height=4, aspect=1, kind='scatter')
+plt.suptitle('Sales vs Advertising Spend', y=1.02)
+plt.show()
+
+# Correlation heatmap
+plt.figure(figsize=(8,6))
+sns.heatmap(advertising.corr(), annot=True, cmap="YlGnBu", fmt=".2f")
+plt.title('Correlation Matrix')
+plt.show()
+
+# Prepare features and target for multiple linear regression
+X = advertising[['TV', 'Radio', 'Newspaper']]
+y = advertising['Sales']
+
+# Split data into train and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=0.7, random_state=100)
+
+# Add constant term for intercept
+X_train_sm = sm.add_constant(X_train)
+
+# Fit multiple linear regression model using OLS
+mlr_model = sm.OLS(y_train, X_train_sm).fit()
+
+# Print model summary
+print(mlr_model.summary())
+
+# Plot actual vs predicted sales on training data
+y_train_pred = mlr_model.predict(X_train_sm)
+plt.figure(figsize=(8,6))
+plt.scatter(y_train, y_train_pred, alpha=0.7)
+plt.plot([y_train.min(), y_train.max()], [y_train.min(), y_train.max()], 'r--')
+plt.xlabel('Actual Sales')
+plt.ylabel('Predicted Sales')
+plt.title('Actual vs Predicted Sales (Training Set)')
+plt.show()
+
+# Residual analysis on training data
+residuals = y_train - y_train_pred
+plt.figure(figsize=(8,5))
+sns.histplot(residuals, bins=20, kde=True)
+plt.title('Residuals Distribution (Training Set)')
+plt.xlabel('Residuals')
+plt.show()
+
+plt.figure(figsize=(8,5))
+plt.scatter(y_train_pred, residuals, alpha=0.7)
+plt.axhline(y=0, color='r', linestyle='--')
+plt.xlabel('Predicted Sales')
+plt.ylabel('Residuals')
+plt.title('Residuals vs Predicted Sales (Training Set)')
+plt.show()
+
+# Predict on test data
+X_test_sm = sm.add_constant(X_test)
+y_test_pred = mlr_model.predict(X_test_sm)
+
+# Evaluate model performance on test set
+rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+r2 = r2_score(y_test, y_test_pred)
+
+print(f"Test RMSE: {rmse:.4f}")
+print(f"Test R-squared: {r2:.4f}")
+
+# Plot actual vs predicted sales on test data
+plt.figure(figsize=(8,6))
+plt.scatter(y_test, y_test_pred, alpha=0.7)
+plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--')
+plt.xlabel('Actual Sales')
+plt.ylabel('Predicted Sales')
+plt.title('Actual vs Predicted Sales (Test Set)')
+plt.show()
+
+# Visualize spending vs sales with regression lines for each media type
+fig, axs = plt.subplots(1, 3, figsize=(18, 5))
+
+for i, media in enumerate(['TV', 'Radio', 'Newspaper']):
+    sns.regplot(x=media, y='Sales', data=advertising, ax=axs[i], scatter_kws={'alpha':0.5})
+    axs[i].set_title(f'Sales vs {media} Advertising Spend')
+
+plt.tight_layout()
+plt.show()
